@@ -91,11 +91,17 @@ class MlmdStateTest(test_utils.TfxTest):
 
   def test_mlmd_execution_update(self):
     event_on_commit = threading.Event()
+
+    def on_commit(pre_commit_execution, post_commit_execution):
+      del pre_commit_execution
+      del post_commit_execution
+      event_on_commit.set()
+
     with self._mlmd_connection as m:
       expected_execution = _write_test_execution(m)
       # Mutate execution.
       with mlmd_state.mlmd_execution_atomic_op(
-          m, expected_execution.id, on_commit=event_on_commit.set) as execution:
+          m, expected_execution.id, on_commit=on_commit) as execution:
         self.assertEqual(expected_execution, execution)
         execution.last_known_state = metadata_store_pb2.Execution.CANCELED
         self.assertFalse(event_on_commit.is_set())  # not yet invoked.
