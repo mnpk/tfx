@@ -286,7 +286,29 @@ class _Generator:
               node_uid=node_uid, state=pstate.NodeState.COMPLETE))
       return result
 
-    # If one of the executions in the set for the node failed or cancelled, the
+    # If an execution failed, try to retry it.
+    latest_failed_executions = [
+        e for e in latest_executions_set
+        if execution_lib.is_execution_failed(e)
+    ]
+    # TODO(zhonghaoyuan): We currently carry over execution failures after users
+    # stop and restart the pipeline. Should we consider to reset the count?
+    if latest_failed_executions and (
+        node.execution_options.max_execution_retries >=
+        task_gen_utils.get_executions_num_of_failure(node_executions)):
+      # Step 1: Replicate a new execution from latest_failed_execution.
+      # latest_failed_executions is sorted descendingly by
+      # __external_execution_index__. There should be only one failed execution.
+      latest_failed_execution = latest_failed_executions[-1]
+      retry_execution = task_gen_utils.register_retry_execution(
+          self._mlmd_handle, node.node_info.type, latest_failed_execution)
+      # Step 2: Create an ExecNodeTask.
+      result.append(
+          task_gen_utils.generate_task_from_execution(self._mlmd_handle,
+                                                      self._pipeline, node,
+                                                      retry_execution))
+      return result
+    # If one of the executions in the set for the node cancelled, the
     # pipeline should be aborted if the node is not in state STARTING.
     # For nodes that are in state STARTING, new executions are created.
     # TODO(b/223627713): a node in a ForEach is not restartable, it is better
