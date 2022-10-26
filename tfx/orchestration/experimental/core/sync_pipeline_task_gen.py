@@ -284,11 +284,6 @@ class _Generator:
               node_uid=node_uid, state=pstate.NodeState.COMPLETE))
       return result
 
-    # If one of the executions in the set for the node failed or cancelled, the
-    # pipeline should be aborted if the node is not in state STARTING.
-    # For nodes that are in state STARTING, new executions are created.
-    # TODO(b/223627713): a node in a ForEach is not restartable, it is better
-    # to prevent restarting for now.
     failed_executions = [
         e for e in latest_executions_set if execution_lib.is_execution_failed(e)
     ]
@@ -308,6 +303,24 @@ class _Generator:
               state=pstate.NodeState.FAILED,
               status=status_lib.Status(
                   code=status_lib.Code.ABORTED, message=error_msg)))
+      return result
+
+    # If the node is canceled, and then restarted, registers new executions
+    # for the node.
+    canceled_executions = [
+        e for e in latest_executions_set
+        if execution_lib.is_execution_canceled(e)
+    ]
+    succeed_executions = [
+        e for e in latest_executions_set
+        if execution_lib.is_execution_successful(e)
+    ]
+    if (node_state.state == pstate.NodeState.STARTING and
+        canceled_executions and len(latest_executions_set) > 1 and
+        len(succeed_executions) + len(canceled_executions)
+        == len(latest_executions_set)):
+      task_gen_utils.register_executions_set_to_restart_node(
+          self._mlmd_handle, node.node_info.type, latest_executions_set)
       return result
 
     # Gets the oldest active execution. If the oldest active execution exists,

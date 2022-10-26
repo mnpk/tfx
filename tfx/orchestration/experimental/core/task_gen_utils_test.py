@@ -374,6 +374,53 @@ class TaskGenUtilsTest(tu.TfxTest):
       self.assertLen(m.store.get_executions_by_context(context_1.id), 2)
       self.assertLen(m.store.get_executions_by_context(context_2.id), 2)
 
+  def test_register_executions_set_to_restart_node(self):
+    with self._mlmd_connection as m:
+      context_type = metadata_store_pb2.ContextType(name='my_ctx_type')
+      context_type_id = m.store.put_context_type(context_type)
+      context = metadata_store_pb2.Context(
+          name='context', type_id=context_type_id)
+      m.store.put_contexts([context])
+
+      # Registers a executions set.
+      executions = task_gen_utils.register_executions(
+          m,
+          execution_type=metadata_store_pb2.ExecutionType(name='my_ex_type'),
+          contexts=[context],
+          input_and_params=[
+              task_gen_utils.InputAndParam(input_artifacts={
+                  'input_example': [standard_artifacts.Examples()]
+              }),
+              task_gen_utils.InputAndParam(input_artifacts={
+                  'input_example': [standard_artifacts.Examples()]
+              })
+          ])
+
+      # Changes the sate of the first execution to COMPLETE, and changes the
+      # second execution to CANCELED.
+      with self._mlmd_connection as m:
+        executions[0].last_known_state = metadata_store_pb2.Execution.COMPLETE
+        executions[1].last_known_state = metadata_store_pb2.Execution.CANCELED
+        m.store.put_executions(executions)
+      latest_execution_set = m.store.get_executions()
+      self.assertLen(latest_execution_set, 2)
+      self.assertEqual(metadata_store_pb2.Execution.COMPLETE,
+                       latest_execution_set[0].last_known_state)
+      self.assertEqual(metadata_store_pb2.Execution.CANCELED,
+                       latest_execution_set[1].last_known_state)
+
+      # Calls the function register_executions_set_to_restart_node()
+      result = task_gen_utils.register_executions_set_to_restart_node(
+          m, metadata_store_pb2.ExecutionType(name='my_ex_type'),
+          latest_execution_set)
+
+      # Tests the result.
+      self.assertLen(result, 2)
+      self.assertEqual(metadata_store_pb2.Execution.COMPLETE,
+                       result[0].last_known_state)
+      self.assertEqual(metadata_store_pb2.Execution.NEW,
+                       result[1].last_known_state)
+
 
 if __name__ == '__main__':
   tf.test.main()

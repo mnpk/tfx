@@ -443,11 +443,13 @@ def register_executions(
         metadata_store_pb2.Execution.NEW,
         input_and_param.exec_properties,
         execution_name=str(uuid.uuid4()))
+    # LINT.IfChange(execution_custom_properties)
     execution.custom_properties[_EXECUTION_SET_SIZE].int_value = len(
         input_and_params)
     execution.custom_properties[_EXECUTION_TIMESTAMP].int_value = timestamp
     execution.custom_properties[_EXTERNAL_EXECUTION_INDEX].int_value = index
     executions.append(execution)
+    # LINT.ThenChange(:new_execution_custom_properties)
 
   if len(executions) == 1:
     return [
@@ -461,3 +463,47 @@ def register_executions(
   return execution_lib.put_executions(
       metadata_handler, executions, contexts,
       [input_and_param.input_artifacts for input_and_param in input_and_params])
+
+
+def register_executions_set_to_restart_node(
+    metadata_handle: metadata.Metadata,
+    execution_type: metadata_store_pb2.ExecutionType,
+    executions: List[metadata_store_pb2.Execution]
+) -> metadata_store_pb2.Execution:
+  """Registers a new executions set from existing executions."""
+  new_executions = []
+  input_artifacts = []
+
+  for execution in executions:
+    if execution_lib.is_execution_successful(execution):
+      state = execution.last_known_state
+    else:
+      state = metadata_store_pb2.Execution.NEW
+    new_execution = execution_lib.prepare_execution(
+        metadata_handler=metadata_handle,
+        execution_type=execution_type,
+        state=state,
+        execution_name=str(uuid.uuid4()))
+    # LINT.IfChange(new_execution_custom_properties)
+    if _EXECUTION_SET_SIZE in execution.custom_properties:
+      new_execution.custom_properties[_EXECUTION_SET_SIZE].CopyFrom(
+          execution.custom_properties[_EXECUTION_SET_SIZE])
+    if _EXECUTION_SET_SIZE in execution.custom_properties:
+      new_execution.custom_properties[_EXECUTION_TIMESTAMP].CopyFrom(
+          execution.custom_properties[_EXECUTION_TIMESTAMP])
+    if _EXECUTION_SET_SIZE in execution.custom_properties:
+      new_execution.custom_properties[_EXTERNAL_EXECUTION_INDEX].CopyFrom(
+          execution.custom_properties[_EXTERNAL_EXECUTION_INDEX])
+    # LINT.ThenChange(:execution_custom_properties)
+
+    new_executions.append(new_execution)
+    input_artifacts.append(
+        execution_lib.get_artifacts_dict(metadata_handle, execution.id,
+                                         [metadata_store_pb2.Event.INPUT]))
+
+  contexts = metadata_handle.store.get_contexts_by_execution(executions[0].id)
+  return execution_lib.put_executions(
+      metadata_handle,
+      new_executions,
+      contexts,
+      input_artifacts_maps=input_artifacts)
