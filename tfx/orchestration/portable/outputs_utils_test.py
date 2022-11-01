@@ -196,6 +196,18 @@ _PIPELINE_NODE = text_format.Parse(
         }
       }
     }
+    outputs {
+      key: "output_7"
+      value {
+        artifact_spec {
+          type {
+            id: 7
+            name: "String"
+          }
+          external_artifact_uris: "{resolved_at_runtime}"
+        }
+      }
+    }
  }
 """, pipeline_pb2.PipelineNode())
 
@@ -232,6 +244,7 @@ class OutputUtilsTest(test_case_utils.TfxTest, parameterized.TestCase):
     self.assertIn('output_4', output_artifacts)
     self.assertIn('output_5', output_artifacts)
     self.assertIn('output_6', output_artifacts)
+    self.assertIn('output_7', output_artifacts)
     self.assertLen(output_artifacts['output_1'], 1)
     self.assertLen(output_artifacts['output_2'], 1)
     self.assertLen(output_artifacts['output_3'], 1)
@@ -240,6 +253,7 @@ class OutputUtilsTest(test_case_utils.TfxTest, parameterized.TestCase):
     # it has to make multiple artifacts of the same number.
     self.assertLen(output_artifacts['output_5'], 2)
     self.assertLen(output_artifacts['output_6'], 1)
+    self.assertLen(output_artifacts['output_7'], 1)
 
     artifact_1 = output_artifacts['output_1'][0]
     self.assertRegex(artifact_1.uri, '.*/test_node/output_1/1')
@@ -323,6 +337,13 @@ class OutputUtilsTest(test_case_utils.TfxTest, parameterized.TestCase):
         id: 6
         name: "String"
         """, artifact_6.artifact_type)
+
+    artifact_7 = output_artifacts['output_7'][0]
+    self.assertEqual(artifact_7.uri, outputs_utils.RESOLVED_AT_RUNTIME)
+    self.assertProtoEquals("""
+        id: 7
+        name: "String"
+        """, artifact_7.artifact_type)
 
   def testGetExecutorOutputUri(self):
     executor_output_uri = self._output_resolver().get_executor_output_uri(1)
@@ -515,6 +536,36 @@ class OutputUtilsTest(test_case_utils.TfxTest, parameterized.TestCase):
           }
         }
         """, executor_output)
+
+  def testInvalidExternalUris(self):
+    invalid_pipeline_node = text_format.Parse(
+        f"""
+  node_info {{
+    id: "test_node"
+  }}
+  outputs {{
+    outputs {{
+      key: "invalid_output"
+      value {{
+        artifact_spec {{
+          type {{
+            id: 1
+            name: "String"
+          }}
+          external_artifact_uris: "{self.tmp_dir}"
+        }}
+      }}
+    }}
+ }}
+""", pipeline_pb2.PipelineNode())
+    with self.assertRaisesRegex(
+        ValueError, 'The uri of the external artifact must be outside'):
+      outputs_utils.OutputsResolver(
+          pipeline_node=invalid_pipeline_node,
+          pipeline_info=_PIPELINE_INFO,
+          pipeline_runtime_spec=self._pipeline_runtime_spec
+      ).generate_output_artifacts(1)
+
 
 if __name__ == '__main__':
   tf.test.main()

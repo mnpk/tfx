@@ -16,6 +16,7 @@ from absl.testing import parameterized
 import tensorflow as tf
 from tfx.orchestration import metadata
 from tfx.orchestration.portable import execution_publish_utils
+from tfx.orchestration.portable import outputs_utils
 from tfx.orchestration.portable.mlmd import context_lib
 from tfx.proto.orchestration import execution_result_pb2
 from tfx.proto.orchestration import pipeline_pb2
@@ -227,6 +228,27 @@ class ExecutionPublisherTest(test_case_utils.TfxTest, parameterized.TestCase):
           self.assertCountEqual([c.id for c in contexts], [
               c.id for c in m.store.get_contexts_by_artifact(output_example.id)
           ])
+
+  def testPublishSuccessfulExecutionWithRuntimeResolvedUri(self):
+    with metadata.Metadata(connection_config=self._connection_config) as m:
+      contexts = self._generate_contexts(m)
+      execution_id = execution_publish_utils.register_execution(
+          m, self._execution_type, contexts).id
+      output_key = 'examples'
+      output_example = standard_artifacts.Examples()
+      output_example.uri = outputs_utils.RESOLVED_AT_RUNTIME
+      executor_output = execution_result_pb2.ExecutorOutput()
+      text_format.Parse(
+          """
+          uri: '/examples_uri'
+          custom_properties {
+            key: 'prop'
+            value {int_value: 1}
+          }
+          """, executor_output.output_artifacts[output_key].artifacts.add())
+      execution_publish_utils.publish_succeeded_execution(
+          m, execution_id, contexts, {output_key: [output_example]},
+          executor_output)
 
   def testPublishSuccessExecutionFailNewKey(self):
     with metadata.Metadata(connection_config=self._connection_config) as m:
