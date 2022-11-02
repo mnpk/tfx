@@ -13,7 +13,7 @@
 # limitations under the License.
 """Module for InputSpec.Channel resolution."""
 
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, cast
 
 from absl import logging
 from tfx import types
@@ -21,6 +21,7 @@ from tfx.orchestration import metadata
 from tfx.orchestration import mlmd_connection_manager as mlmd_cm
 from tfx.orchestration.portable.mlmd import event_lib
 from tfx.orchestration.portable.mlmd import execution_lib
+from tfx.proto.orchestration import metadata_pb2
 from tfx.proto.orchestration import pipeline_pb2
 from tfx.types import artifact_utils
 
@@ -152,12 +153,32 @@ def resolve_union_channels(
   """Evaluate InputSpec.channels."""
   seen = set()
   result = []
+  primary_handle = mlmd_cm.get_primary_handle(mlmd_handle)
   for channel in channels:
-    # TODO(b/250069301) If the artifacts are from external db, we should update
-    # the following code to get artifacts from external db.
-    primary_mlmd_handle = mlmd_cm.get_primary_handle(mlmd_handle)
-    for artifact in resolve_single_channel(primary_mlmd_handle, channel):
-      if artifact.id not in seen:
-        seen.add(artifact.id)
+    config = metadata_pb2.MLMDServiceConfig()
+    if channel.HasField('metadata_connection_config') and isinstance(
+        mlmd_handle, mlmd_cm.MLMDConnectionManager):
+      mlmd_connection_manager = cast(mlmd_cm.MLMDConnectionManager, mlmd_handle)
+      channel.metadata_connection_config.Unpack(config)
+      single_channel_mlmd_handle = mlmd_connection_manager.get_mlmd_handle(
+          owner_name=config.owner,
+          project_name=config.name,
+          mlmd_service_target_name=config.mlmd_service_target)
+    else:
+      single_channel_mlmd_handle = primary_handle
+
+    for artifact in resolve_single_channel(single_channel_mlmd_handle, channel):
+      artifact_identifier = artifact.id
+      if single_channel_mlmd_handle != primary_handle:
+        artifact_identifier = str(config.SerializeToString()) + str(artifact.id)
+        # Adds external_id and set is_external=True to the artifacts from
+        # external dbs.
+        updated_artifact = mlmd_connection_manager.add_reference_to_artifact(
+            artifact.mlmd_artifact, config.owner, config.name)
+        artifact.set_mlmd_artifact(updated_artifact)
+        artifact.is_external = True
+
+      if artifact_identifier not in seen:
+        seen.add(artifact_identifier)
         result.append(artifact)
   return result

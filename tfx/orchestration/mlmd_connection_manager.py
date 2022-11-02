@@ -15,9 +15,11 @@
 
 import dataclasses
 import types
-from typing import Optional, Type, Callable, Union
+from typing import Callable, Optional, Type, Union
 
 from tfx.orchestration import metadata
+
+from ml_metadata.proto import metadata_store_pb2
 
 
 @dataclasses.dataclass
@@ -47,7 +49,10 @@ class MLMDConnectionManager:
       primary_mlmd_handle: metadata.Metadata,
       primary_mlmd_handle_config: Optional[MLMDConnectionConfig] = None,
       create_reader_mlmd_connection_fn: Optional[Callable[
-          [MLMDConnectionConfig], metadata.Metadata]] = None):
+          [MLMDConnectionConfig], metadata.Metadata]] = None,
+      add_reference_to_artifact_fn: Optional[
+          Callable[[metadata_store_pb2.Artifact, str, str],
+                   metadata_store_pb2.Artifact]] = None):
     """Constructor of MLMDConnectionManager.
 
     Args:
@@ -55,6 +60,8 @@ class MLMDConnectionManager:
       primary_mlmd_handle_config: Config of the primary mlmd handle.
       create_reader_mlmd_connection_fn: Callable function for create a mlmd
         connection.
+      add_reference_to_artifact_fn: Callable function for adding external id to
+        an artifact.
     """
     if not primary_mlmd_handle:
       raise ValueError('Primary mlmd handle can not be None.')
@@ -62,6 +69,7 @@ class MLMDConnectionManager:
     self._primary_mlmd_handle_config = primary_mlmd_handle_config
     self._reader_mlmd_handles = {}
     self._create_reader_mlmd_connection_fn = create_reader_mlmd_connection_fn
+    self._add_reference_to_artifact_fn = add_reference_to_artifact_fn
 
   def __enter__(self):
     self._primary_mlmd_handle.__enter__()
@@ -106,6 +114,16 @@ class MLMDConnectionManager:
       return self._reader_mlmd_handles.get(connection_config)
 
     return None
+
+  def add_reference_to_artifact(self, artifct: metadata_store_pb2.Artifact,
+                                db_owner: str,
+                                db_name: str) -> metadata_store_pb2.Artifact:
+    if not self._add_reference_to_artifact_fn:
+      raise ValueError(
+          'add_reference_to_artifact_fn is None. It is not allowed to call '
+          'add_reference_to_artifact().')
+
+    return self._add_reference_to_artifact_fn(artifct, db_owner, db_name)
 
 
 MLMDHandleType = Union[metadata.Metadata, MLMDConnectionManager]

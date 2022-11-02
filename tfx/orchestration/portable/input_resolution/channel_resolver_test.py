@@ -13,7 +13,11 @@
 # limitations under the License.
 """Tests for tfx.orchestration.portable.input_resolution.channel_resolver."""
 
+import copy
+
+from absl.testing.absltest import mock
 import tensorflow as tf
+from tfx.orchestration import mlmd_connection_manager as mlmd_cm
 from tfx.orchestration.portable.input_resolution import channel_resolver
 from tfx.proto.orchestration import pipeline_pb2
 from tfx.utils import test_case_utils
@@ -451,6 +455,52 @@ class ChannelResolverTest(test_case_utils.TfxTest, test_case_utils.MlmdMixins):
         self.mlmd_handle, [ch, ch])
     self.assertLen(resolved, 1)
     self.assertEqual(resolved[0].id, e1.id)
+
+  def testResolveUnionChannels_ExternalDB(self):
+    p = self.put_context('pipeline', 'pipeline')
+    artifact = self.put_artifact('Examples')
+    self.put_execution(
+        'ExampleGen', inputs={}, outputs={'examples': [artifact]}, contexts=[p])
+
+    ch = self.make_channel_spec("""
+      context_queries {
+        type {
+          name: "pipeline"
+        }
+        name {
+          field_value {
+            string_value: "pipeline"
+          }
+        }
+      }
+      artifact_query {
+        type {
+          name: "Examples"
+        }
+      }
+      output_key: "examples"
+      metadata_connection_config {
+        [type.googleapis.com/tfx.orchestration.MLMDServiceConfig] {
+          owner: "owner"
+          name: "external-project"
+          mlmd_service_target: "mlmd-service-target"
+        }
+      }
+    """)
+
+    updated_artifact = copy.deepcopy(artifact)
+    updated_artifact.ClearField('id')
+
+    mock_mlmd_connection_manager = mock.create_autospec(
+        mlmd_cm.MLMDConnectionManager, instance=True)
+    mock_mlmd_connection_manager.get_mlmd_handle.return_value = self.mlmd_handle
+    mock_mlmd_connection_manager.add_reference_to_artifact.return_value = updated_artifact
+
+    resolved = channel_resolver.resolve_union_channels(
+        mock_mlmd_connection_manager, [ch])
+    self.assertLen(resolved, 1)
+    self.assertEqual(resolved[0].id, 0)
+    self.assertTrue(resolved[0].is_external)
 
 
 if __name__ == '__main__':
