@@ -16,7 +16,7 @@
 import tensorflow as tf
 from tfx import types
 from tfx.dsl.components.common import resolver
-from tfx.dsl.input_resolution import resolver_function
+from tfx.dsl.input_resolution import canned_resolver_functions
 from tfx.dsl.input_resolution.strategies import latest_artifact_strategy
 from tfx.orchestration import data_types
 from tfx.orchestration import metadata
@@ -67,7 +67,7 @@ class ResolverTest(tf.test.TestCase):
   def testResolverDefinition_BadChannel(self):
     with self.assertRaisesRegex(
         ValueError,
-        'Expected extra kwarg .* to be of type .*tfx.types.BaseChannel'):
+        'Resolver got non-BaseChannel argument not_a_channel'):
       resolver.Resolver(
           strategy_class=latest_artifact_strategy.LatestArtifactStrategy,
           config={'desired_num_of_artifacts': 5},
@@ -81,23 +81,12 @@ class ResolverTest(tf.test.TestCase):
         TypeError, 'strategy_class should be ResolverStrategy'):
       resolver.Resolver(strategy_class=NotAStrategy)
 
-  def testResolverDefinition_BadFunction(self):
-    with self.assertRaisesRegex(
-        TypeError, 'function should be ResolverFunction'):
-      resolver.Resolver(function=42)
-
-  def testResolverDefinition_ExactlyOneOfStrategyClassOrFunction(self):
-    with self.assertRaisesRegex(
-        ValueError, 'Exactly one of strategy_class= or function= argument '
-        'should be given.'):
-      resolver.Resolver()
-
-    with self.assertRaisesRegex(
-        ValueError, 'Exactly one of strategy_class= or function= argument '
-        'should be given.'):
-      resolver.Resolver(
-          strategy_class=latest_artifact_strategy.LatestArtifactStrategy,
-          function=resolver_function.ResolverFunction(lambda x: x))
+  def testResolverDefinition_StrategyCanBeOmitted(self):
+    latest_examples = canned_resolver_functions.latest_created(
+        types.Channel(standard_artifacts.Examples))
+    r = resolver.Resolver(examples=latest_examples).with_id('my_resolver')
+    self.assertIsInstance(r.outputs['examples'], types.OutputChannel)
+    self.assertEqual(r.outputs['examples'].producer_component_id, 'my_resolver')
 
 
 class ResolverDriverTest(tf.test.TestCase):

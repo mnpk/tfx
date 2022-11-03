@@ -14,15 +14,15 @@
 """TFX Resolver definition."""
 
 import abc
-from typing import Any, Dict, List, Optional, Type, Mapping, cast
+from typing import Any, Dict, List, Optional, Type, Mapping
 
 from tfx import types
 from tfx.dsl.components.base import base_driver
 from tfx.dsl.components.base import base_node
-from tfx.dsl.input_resolution import resolver_function
 from tfx.dsl.input_resolution import resolver_op
 from tfx.orchestration import data_types
 from tfx.orchestration import metadata
+from tfx.types import channel as channel_types
 from tfx.types import channel_utils
 from tfx.types import resolved_channel
 from tfx.utils import doc_controls
@@ -208,7 +208,7 @@ class Resolver(base_node.BaseNode):
   def __init__(self,
                strategy_class: Optional[Type[ResolverStrategy]] = None,
                config: Optional[Dict[str, json_utils.JsonableType]] = None,
-               **kwargs: types.BaseChannel):
+               **channels: types.BaseChannel):
     """Init function for Resolver.
 
     Args:
@@ -216,68 +216,51 @@ class Resolver(base_node.BaseNode):
           resolution logic.
       config: Optional dict of key to Jsonable type for constructing
           resolver_strategy.
-      **kwargs: Input channels to the Resolver node as keyword arguments.
+      **channels: Input channels to the Resolver node as keyword arguments.
     """
-    function = kwargs.pop('function', None)
-    channels = kwargs
-    if (strategy_class is not None) + (function is not None) != 1:
-      raise ValueError('Exactly one of strategy_class= or function= argument '
-                       'should be given.')
     if (strategy_class is not None and
         not issubclass(strategy_class, ResolverStrategy)):
       raise TypeError('strategy_class should be ResolverStrategy, but got '
                       f'{strategy_class} instead.')
-    if function is not None:
-      if not isinstance(function, resolver_function.ResolverFunction):
-        raise TypeError(f'function should be ResolverFunction, but got '
-                        f'{function} instead.')
-      function = cast(resolver_function.ResolverFunction, function)
+    if strategy_class is None and config is not None:
+      raise ValueError('Cannot use config parameter without strategy_class.')
+    for input_key, channel in channels.items():
+      if not isinstance(channel, channel_types.BaseChannel):
+        raise ValueError(f'Resolver got non-BaseChannel argument {input_key}.')
+
     self._strategy_class = strategy_class
     self._config = config or {}
-    trace_input = resolver_op.InputNode(
-        channels, resolver_op.DataType.ARTIFACT_MULTIMAP)
-    if function is not None:
-      self._trace_result = function.trace(trace_input)
-    else:
-      self._trace_result = resolver_op.OpNode(
+    if strategy_class is not None:
+      output_node = resolver_op.OpNode(
           op_type=strategy_class,
           output_data_type=resolver_op.DataType.ARTIFACT_MULTIMAP,
-          args=[trace_input],
+          args=[
+              resolver_op.DictNode({
+                  input_key: resolver_op.InputNode(
+                      channel, resolver_op.DataType.ARTIFACT_LIST)
+                  for input_key, channel in channels.items()
+              })
+          ],
           kwargs=self._config)
-    # An observed inputs from DSL as if Resolver node takes an inputs.
-    # TODO(b/246907396): Remove raw_inputs usage.
-    self._raw_inputs = channels
-    self._input_dict = {}
-    self._output_dict = {}
-    for k, c in channels.items():
-      if not isinstance(c, types.BaseChannel):
-        raise ValueError(
-            f'Expected extra kwarg {k!r} to be of type `tfx.types.BaseChannel` '
-            f'but got {c!r} instead.')
-      self._input_dict[k] = resolved_channel.ResolvedChannel(
-          c.type, self._trace_result, k)
-      # TODO(b/161490287): remove static artifacts.
-      self._output_dict[k] = (
-          types.OutputChannel(c.type, self, k).set_artifacts([c.type()]))
+      self._input_dict = {
+          k: resolved_channel.ResolvedChannel(c.type, output_node, k)
+          for k, c in channels.items()
+      }
+    else:
+      self._input_dict = channels
+    self._output_dict = {
+        input_key: types.OutputChannel(channel.type, self, input_key)
+        for input_key, channel in channels.items()
+    }
     super().__init__(driver_class=_ResolverDriver)
 
   @property
   @doc_controls.do_not_generate_docs
-  def trace_result(self) -> resolver_op.Node:
-    return self._trace_result
-
-  @property
-  @doc_controls.do_not_generate_docs
-  def raw_inputs(self) -> Dict[str, types.BaseChannel]:
-    return self._raw_inputs
-
-  @property
-  @doc_controls.do_not_generate_docs
-  def inputs(self) -> Dict[str, Any]:
+  def inputs(self) -> Dict[str, channel_types.BaseChannel]:
     return self._input_dict
 
   @property
-  def outputs(self) -> Dict[str, Any]:
+  def outputs(self) -> Dict[str, channel_types.OutputChannel]:
     """Output Channel dict that contains resolved artifacts."""
     return self._output_dict
 
