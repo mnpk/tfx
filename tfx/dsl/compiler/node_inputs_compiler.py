@@ -234,6 +234,17 @@ def _compile_input_spec(
       ctx.type.name = constants.PIPELINE_RUN_CONTEXT_TYPE_NAME
       ctx.name.field_value.string_value = channel.pipeline_run_id
 
+    if pipeline_ctx.pipeline.platform_config:
+      project_config = (
+          pipeline_ctx.pipeline.platform_config.project_platform_config)
+      project_name = project_config.project_name
+      project_owner = project_config.owner
+      if (project_name == channel.project_name and
+          project_owner == channel.project_owner):
+        raise ValueError(
+            'Can not use ExternalProjectChannel to get artifacts from the local '
+            'MLMD db.')
+
     if channel.project_owner and channel.project_name and channel.mlmd_service_target:
       config = metadata_pb2.MLMDServiceConfig(
           owner=channel.project_owner,
