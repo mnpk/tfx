@@ -37,6 +37,8 @@ ExecPropertyTypes = Union[int, float, str, bool, message.Message, List[Any],
                           Dict[Any, Any]]
 _EXEC_PROPERTY_CLASSES = (int, float, str, bool, message.Message, list, dict)
 
+_MLMD_SERVICE_TARGET = 'blade:ml_metadata.mlmdservice-prod'
+
 
 def _is_artifact_type(value: Any):
   return inspect.isclass(value) and issubclass(value, Artifact)
@@ -645,7 +647,8 @@ class ExternalProjectChannel(BaseChannel):
     self.producer_component_id = producer_component_id
     self.output_key = output_key
     self.pipeline_name = pipeline_name if pipeline_name else project_name
-    self.mlmd_service_target = mlmd_service_target
+    self.mlmd_service_target = (
+        mlmd_service_target if mlmd_service_target else _MLMD_SERVICE_TARGET)
     self.pipeline_run_id = pipeline_run_id
 
   def get_data_dependent_node_ids(self) -> Set[str]:
