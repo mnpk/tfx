@@ -20,7 +20,6 @@ import textwrap
 from typing import Any, cast, Dict, Iterable, List, Optional, Type, Union, Set
 from absl import logging
 
-from tfx.dsl.context_managers import dsl_context
 from tfx.dsl.placeholder import placeholder
 from tfx.types import artifact_utils
 from tfx.types.artifact import Artifact
@@ -458,24 +457,22 @@ class UnionChannel(BaseChannel):
   does not yet work with channel union.
   """
 
-  def __init__(self, type: Type[Artifact], input_channels: List[BaseChannel]):  # pylint: disable=redefined-builtin
-    super().__init__(type=type)
-
-    if not input_channels:
+  def __init__(self, channels: Iterable[BaseChannel]):
+    channels = list(channels)
+    if not channels:
       raise ValueError('At least one input channel expected.')
 
     self.channels = []
-    for c in input_channels:
-      if isinstance(c, UnionChannel):
-        self.channels.extend(cast(UnionChannel, c).channels)
-      elif isinstance(c, Channel):
-        self.channels.append(c)
+    for channel in channels:
+      if isinstance(channel, UnionChannel):
+        self.channels.extend(cast(UnionChannel, channel).channels)
+      elif isinstance(channel, BaseChannel):
+        self.channels.append(channel)
       else:
-        raise ValueError('Unexpected channel type: %s.' % c.type_name)
+        raise ValueError('Unexpected channel type: %s.' % channel.type_name)
 
-    self._validate_type()
+    super().__init__(type=channels[0].type)
 
-  def _validate_type(self):
     for channel in self.channels:
       if not isinstance(channel, Channel) or channel.type != self.type:
         raise TypeError(
@@ -489,44 +486,11 @@ class UnionChannel(BaseChannel):
     return set()
 
 
+@deprecation_utils.deprecated(
+    None, 'Please use `tfx.types.channel_utils.union()` instead.')
 def union(input_channels: Iterable[BaseChannel]) -> UnionChannel:
   """Convenient method to combine multiple input channels into union channel."""
-  input_channels = list(input_channels)
-  assert input_channels, 'Not expecting empty input channels list.'
-  return UnionChannel(input_channels[0].type, input_channels)
-
-
-@doc_controls.do_not_generate_docs
-class LoopVarChannel(BaseChannel):
-  """LoopVarChannel is a channel that is marked as a ForEach loop variable.
-
-  There is no special functionality for this channel itself; it just marks the
-  channel as a loop variable, and holds the context ID for the corresponding
-  ForEachContext.
-  """
-
-  def __init__(self, wrapped: BaseChannel,
-               for_each_context: dsl_context.DslContext):
-    """LoopVarChannel constructor.
-
-    Arguments:
-      wrapped: A wrapped BaseChannel.
-      for_each_context: An ID for the corresponding ForEachContext.
-    """
-    super().__init__(wrapped.type)
-    self._wrapped = wrapped
-    self._for_each_context = for_each_context
-
-  def get_data_dependent_node_ids(self) -> Set[str]:
-    return self._wrapped.get_data_dependent_node_ids()
-
-  @property
-  def wrapped(self) -> BaseChannel:
-    return self._wrapped
-
-  @property
-  def for_each_context(self) -> dsl_context.DslContext:
-    return self._for_each_context
+  return UnionChannel(input_channels)
 
 
 @doc_controls.do_not_generate_docs
